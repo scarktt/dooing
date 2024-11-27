@@ -34,6 +34,7 @@ function M.add_todo(text, priority_index)
 		done = false,
 		category = text:match("#(%w+)") or "",
 		created_at = os.time(),
+		priority = priority_index,
 	})
 	save_todos()
 end
@@ -85,9 +86,27 @@ end
 
 function M.sort_todos()
 	table.sort(M.todos, function(a, b)
-		if a.done ~= b.done then
-			return not a.done
+		-- If prioritization is enabled, sort by priority first
+		if config.options.prioritization then
+			-- If both todos have priorities, compare them
+			if a.priority and b.priority then
+				if a.priority ~= b.priority then
+					return a.priority < b.priority -- Lower number = higher priority
+				end
+			-- If only one has priority, it goes first
+			elseif a.priority then
+				return true
+			elseif b.priority then
+				return false
+			end
 		end
+
+		-- Then sort by completion status
+		if a.done ~= b.done then
+			return not a.done -- Undone items come first
+		end
+
+		-- Finally sort by creation time
 		return a.created_at < b.created_at
 	end)
 end

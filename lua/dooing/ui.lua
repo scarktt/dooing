@@ -50,9 +50,19 @@ local edit_todo
 -- Highlights Setup
 --------------------------------------------------
 -- Set up highlights
-vim.api.nvim_set_hl(0, "DooingPending", { link = "Question", default = true })
-vim.api.nvim_set_hl(0, "DooingDone", { link = "Comment", default = true })
-vim.api.nvim_set_hl(0, "DooingHelpText", { link = "Directory", default = true })
+
+local function setup_highlights()
+	vim.api.nvim_set_hl(0, "DooingPending", { link = "Question", default = true })
+	vim.api.nvim_set_hl(0, "DooingDone", { link = "Comment", default = true })
+	vim.api.nvim_set_hl(0, "DooingHelpText", { link = "Directory", default = true })
+
+	if config.options.prioritization then
+		local priorities = config.options.priorities
+		for _, priority in ipairs(priorities) do
+			vim.api.nvim_set_hl(0, priority.color, { link = priority.hl_group, default = true })
+		end
+	end
+end
 
 --------------------------------------------------
 -- Todo Management Functions
@@ -273,6 +283,8 @@ local function create_window()
 	local col = math.floor((ui.width - width) / 2)
 	local row = math.floor((ui.height - height) / 2)
 
+	setup_highlights()
+
 	local function set_conditional_keymap(key_option, callback, opts)
 		if config.options.keymaps[key_option] then
 			vim.keymap.set("n", config.options.keymaps[key_option], callback, opts)
@@ -329,17 +341,24 @@ function M.render_todos()
 
 	local lines = { "" }
 	state.sort_todos()
+	local priorities = config.options.priorities
 
 	for _, todo in ipairs(state.todos) do
 		if not state.active_filter or todo.text:match("#" .. state.active_filter) then
-			local icon = todo.done and "✓" or "○"
+			local check_icon = todo.done and "✓" or "○"
+			local priority_icon = ""
 			local text = todo.text
+
+			-- Only add priority icon if prioritization is enabled and todo has priority
+			if config.options.prioritization and todo.priority and priorities[todo.priority] then
+				priority_icon = priorities[todo.priority].icon .. " "
+			end
 
 			if todo.done then
 				text = "~" .. text .. "~"
 			end
 
-			table.insert(lines, "  " .. icon .. " " .. text)
+			table.insert(lines, "  " .. check_icon .. " " .. priority_icon .. text)
 		end
 	end
 
@@ -357,8 +376,16 @@ function M.render_todos()
 			local todo_index = i - (state.active_filter and 3 or 1)
 			local todo = state.todos[todo_index]
 			if todo then
-				local hl_group = todo.done and "DooingDone" or "DooingPending"
-				vim.api.nvim_buf_add_highlight(buf_id, ns_id, hl_group, i - 1, 0, -1)
+				-- If todo is done, use DooingDone highlight
+				if todo.done then
+					vim.api.nvim_buf_add_highlight(buf_id, ns_id, "DooingDone", i - 1, 0, -1)
+				else
+					-- If prioritization is enabled and todo has priority, use priority color
+					-- Otherwise use the default pending highlight
+					local hl_group = config.options.prioritization and todo.priority and priorities[todo.priority].color
+						or "DooingPending"
+					vim.api.nvim_buf_add_highlight(buf_id, ns_id, hl_group, i - 1, 0, -1)
+				end
 
 				-- Highlight tags
 				for tag in line:gmatch("#(%w+)") do
@@ -403,35 +430,69 @@ end
 function M.new_todo()
 	vim.ui.input({ prompt = "New to-do: " }, function(input)
 		if input and input ~= "" then
-			state.add_todo(input)
-			M.render_todos()
+			-- Check if prioritization is enabled
+			if config.options.prioritization then
+				local priorities = config.options.priorities
+				local priority_options = {}
 
-			-- Find either the first completed todo or the last uncompleted todo
-			local total_lines = vim.api.nvim_buf_line_count(buf_id)
-			local target_line = nil
-			local last_uncompleted_line = nil
-
-			for i = 1, total_lines do
-				local line = vim.api.nvim_buf_get_lines(buf_id, i - 1, i, false)[1]
-				-- Track the last uncompleted todo
-				if line:match("^%s+[○]") then
-					last_uncompleted_line = i
+				for i, priority in ipairs(priorities) do
+					priority_options[i] = string.format("%d. %s %s", i, priority.icon, priority.name)
 				end
-				-- Look for the first completed todo
-				if line:match("^%s+[✓].*~") then
-					target_line = i - 1 -- Position cursor one line above the completed todo
-					break
-				end
-			end
 
-			-- If no completed todos found, use the last uncompleted todo line
-			if not target_line and last_uncompleted_line then
-				target_line = last_uncompleted_line
-			end
+				vim.ui.select(priority_options, {
+					prompt = "Select priority level",
+					kind = "dooing_priority",
+					format_item = function(item)
+						return item
+					end,
+					telescope_theme = {
+						layout_config = {
+							width = 0.3,
+							height = 0.2,
+						},
+						highlights = {
+							["1. 🔥 important and urgent"] = { link = "DiagnosticError" },
+							["2. ⭐ important and not urgent"] = { link = "DiagnosticWarn" },
+							["3. ⏰ not important and urgent"] = { link = "DiagnosticInfo" },
+							["4. 📝 not important and not urgent"] = { link = "DiagnosticHint" },
+						},
+					},
+				}, function(choice, idx)
+					if not idx then
+						return
+					end
 
-			-- If we found a valid line, move cursor there
-			if target_line then
-				vim.api.nvim_win_set_cursor(win_id, { target_line, 0 })
+					state.add_todo(input, idx)
+					M.render_todos()
+
+					-- Position cursor logic...
+					local total_lines = vim.api.nvim_buf_line_count(buf_id)
+					local target_line = nil
+					local last_uncompleted_line = nil
+
+					for i = 1, total_lines do
+						local line = vim.api.nvim_buf_get_lines(buf_id, i - 1, i, false)[1]
+						if line:match("^%s+[○]") then
+							last_uncompleted_line = i
+						end
+						if line:match("^%s+[✓].*~") then
+							target_line = i - 1
+							break
+						end
+					end
+
+					if not target_line and last_uncompleted_line then
+						target_line = last_uncompleted_line
+					end
+
+					if target_line then
+						vim.api.nvim_win_set_cursor(win_id, { target_line, 0 })
+					end
+				end)
+			else
+				-- If prioritization is disabled, just add the todo without priority
+				state.add_todo(input)
+				M.render_todos()
 			end
 		end
 	end)
