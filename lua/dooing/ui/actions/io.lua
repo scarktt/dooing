@@ -1,3 +1,7 @@
+---------------------------------------------
+--- Incredible feature developed by @derivia
+---------------------------------------------
+
 local M = {}
 
 -- Dependencies

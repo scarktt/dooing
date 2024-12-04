@@ -1,4 +1,3 @@
--- lua/dooing/ui/render.lua
 local M = {}
 
 -- Dependencies

@@ -1,4 +1,3 @@
--- Declare vim locally at the top
 local vim = vim
 
 local M = {}
@@ -168,24 +167,6 @@ end
 
 function M.set_filter(tag)
 	M.active_filter = tag
-end
-
-function M.delete_todo(index)
-	if M.todos[index] then
-		table.remove(M.todos, index)
-		save_todos()
-	end
-end
-
-function M.delete_completed()
-	local remaining_todos = {}
-	for _, todo in ipairs(M.todos) do
-		if not todo.done then
-			table.insert(remaining_todos, todo)
-		end
-	end
-	M.todos = remaining_todos
-	save_todos()
 end
 
 -- Helper function for hashing a todo object
@@ -636,7 +617,6 @@ function M.undo_delete()
 	return true
 end
 
--- Modify the delete_todo function in state.lua:
 function M.delete_todo(index)
 	if M.todos[index] then
 		local todo = M.todos[index]

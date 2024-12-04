@@ -1,4 +1,8 @@
--- lua/dooing/ui/actions/todo.lua
+---------------------------------------------
+--- Task prioritization and time sorting made by @clementpoiret
+--- Due date functionality made by @derivia
+---------------------------------------------
+
 local M = {}
 
 -- Dependencies
