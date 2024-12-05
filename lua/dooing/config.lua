@@ -54,6 +54,7 @@ M.defaults = {
 	save_path = vim.fn.stdpath("data") .. "/dooing_todos.json",
 	keymaps = {
 		toggle_window = "<leader>td",
+		toggle_kanban = "<leader>tk",
 		new_todo = "i",
 		toggle_todo = "x",
 		delete_todo = "d",

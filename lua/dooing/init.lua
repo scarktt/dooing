@@ -3,9 +3,16 @@ local config = require("dooing.config")
 local ui = require("dooing.ui")
 local state = require("dooing.state")
 
+local kanban = require("dooing.ui.windows.kanban")
 function M.setup(opts)
 	config.setup(opts)
 	state.load_todos()
+
+	if config.options.keymaps.toggle_kanban then
+		vim.keymap.set("n", config.options.keymaps.toggle_kanban, function()
+			kanban.create()
+		end, { desc = "Toggle Kanban Board" })
+	end
 
 	vim.api.nvim_create_user_command("Dooing", function(opts)
 		local args = vim.split(opts.args, "%s+", { trimempty = true })
