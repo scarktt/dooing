@@ -52,9 +52,7 @@ function M.setup(opts)
 							vim.notify(
 								"Invalid priorities: " .. table.concat(invalid_priorities, ", "),
 								vim.log.levels.WARN,
-								{
-									title = "Dooing",
-								}
+								{ title = "Dooing" }
 							)
 						end
 
@@ -77,38 +75,12 @@ function M.setup(opts)
 
 			todo_text = vim.trim(todo_text)
 			if todo_text ~= "" then
-				state.add_todo(todo_text, priorities)
+				actions.create_todo(todo_text, priorities)
 				local msg = "Todo created: " .. todo_text
 				if priorities then
 					msg = msg .. " (priorities: " .. table.concat(priorities, ", ") .. ")"
 				end
-				vim.notify(msg, vim.log.levels.INFO, {
-					title = "Dooing",
-				})
-			end
-		elseif command == "list" then
-			-- Print all todos with their indices
-			for i, todo in ipairs(state.todos) do
-				local status = todo.done and "✓" or "○"
-
-				-- Build metadata string
-				local metadata = {}
-				if todo.priorities and #todo.priorities > 0 then
-					table.insert(metadata, "priorities: " .. table.concat(todo.priorities, ", "))
-				end
-				if todo.due_date then
-					table.insert(metadata, "due: " .. todo.due_date)
-				end
-				if todo.estimated_hours then
-					table.insert(metadata, string.format("estimate: %.1fh", todo.estimated_hours))
-				end
-
-				local score = state.get_priority_score(todo)
-				table.insert(metadata, string.format("score: %.1f", score))
-
-				local metadata_text = #metadata > 0 and " (" .. table.concat(metadata, ", ") .. ")" or ""
-
-				vim.notify(string.format("%d. %s %s%s", i, status, todo.text, metadata_text), vim.log.levels.INFO)
+				vim.notify(msg, vim.log.levels.INFO, { title = "Dooing" })
 			end
 		elseif command == "set" then
 			if #args < 3 then
@@ -117,69 +89,16 @@ function M.setup(opts)
 			end
 
 			local index = tonumber(args[1])
-			if not index or not state.todos[index] then
-				vim.notify("Invalid todo index: " .. args[1], vim.log.levels.ERROR)
-				return
-			end
-
 			local field = args[2]
 			local value = args[3]
 
-			if field == "priorities" then
-				-- Handle priority setting
-				if value == "nil" then
-					-- Clear priorities
-					state.todos[index].priorities = nil
-					state.save_todos()
-					vim.notify("Cleared priorities for todo " .. index, vim.log.levels.INFO)
-				else
-					-- Handle priority setting
-					local priority_list = vim.split(value, ",", { trimempty = true })
-					local valid_priorities = {}
-					local invalid_priorities = {}
-
-					for _, p in ipairs(priority_list) do
-						local is_valid = false
-						for _, config_p in ipairs(config.options.priorities) do
-							if p == config_p.name then
-								is_valid = true
-								table.insert(valid_priorities, p)
-								break
-							end
-						end
-						if not is_valid then
-							table.insert(invalid_priorities, p)
-						end
-					end
-
-					if #invalid_priorities > 0 then
-						vim.notify(
-							"Invalid priorities: " .. table.concat(invalid_priorities, ", "),
-							vim.log.levels.WARN
-						)
-					end
-
-					if #valid_priorities > 0 then
-						state.todos[index].priorities = valid_priorities
-						state.save_todos()
-						vim.notify("Updated priorities for todo " .. index, vim.log.levels.INFO)
-					end
-				end
-			elseif field == "ect" then
-				-- Handle estimated completion time setting
-				local hours, err = ui.parse_time_estimation(value)
-				if hours then
-					state.todos[index].estimated_hours = hours
-					state.save_todos()
-					vim.notify("Updated estimated completion time for todo " .. index, vim.log.levels.INFO)
-				else
-					vim.notify("Error: " .. (err or "Invalid time format"), vim.log.levels.ERROR)
-				end
+			if field == "ect" then
+				actions.add_time_estimation(index, value)
+			elseif field == "due" then
+				actions.add_due_date(index, value)
 			else
 				vim.notify("Unknown field: " .. field, vim.log.levels.ERROR)
 			end
-		else
-			ui.toggle_todo_window()
 		end
 	end, {
 		desc = "Toggle Todo List window or add new todo",

@@ -6,6 +6,8 @@ local M = {}
 
 -- Dependencies
 local state = require("dooing.state")
+local config = require("dooing.config")
+local Render = require("dooing.ui.render")
 
 -- Local window IDs and buffers
 local win_id = nil
@@ -13,6 +15,18 @@ local buf_id = nil
 
 -- Namespace for highlighting
 local ns_id = vim.api.nvim_create_namespace("dooing_search")
+
+-- Simplified formatting configuration for search results
+local search_formatting = {
+	pending = {
+		icon = "○",
+		format = { "icon", "text" }, -- Simplified format for search results
+	},
+	done = {
+		icon = "✓",
+		format = { "icon", "text" }, -- Simplified format for search results
+	},
+}
 
 -- Handle search query results
 local function handle_search_query(query, main_win_id, render_callback)
@@ -26,20 +40,20 @@ local function handle_search_query(query, main_win_id, render_callback)
 		return
 	end
 
-	local done_icon = require("dooing.config").options.formatting.done.icon
-	local pending_icon = require("dooing.config").options.formatting.pending.icon
-
 	-- Prepare the search results
 	local results = state.search_todos(query)
 	vim.api.nvim_buf_set_option(buf_id, "modifiable", true)
-	local lines = { "Search Results for: " .. query, "" }
-	local valid_lines = {} -- Store valid todo lines
+	local lines = {
+		"Search Results for: " .. query,
+		"",
+	}
+	local valid_lines = {}
 
 	if #results > 0 then
 		for _, result in ipairs(results) do
-			local icon = result.todo.done and done_icon or pending_icon
-			local line = string.format("  %s %s", icon, result.todo.text)
-			table.insert(lines, line)
+			-- Use the render module's format_todo with simplified formatting
+			local todo_text = Render.format_todo(result.todo, search_formatting)
+			table.insert(lines, "  " .. todo_text)
 			table.insert(valid_lines, { line_index = #lines, result = result })
 		end
 	else
@@ -49,21 +63,89 @@ local function handle_search_query(query, main_win_id, render_callback)
 
 	-- Add search results to window
 	vim.api.nvim_buf_set_lines(buf_id, 0, -1, false, lines)
-
-	-- After adding search results, make it unmodifiable
 	vim.api.nvim_buf_set_option(buf_id, "modifiable", false)
 
-	-- Highlight todos on search results
+	-- Clear existing highlights
+	vim.api.nvim_buf_clear_namespace(buf_id, ns_id, 0, -1)
+
+	-- Apply highlights
+	local done_icon = config.options.formatting.done.icon
+	local pending_icon = config.options.formatting.pending.icon
+
 	for i, line in ipairs(lines) do
+		local line_nr = i - 1
 		if line:match("^%s+[" .. done_icon .. pending_icon .. "]") then
-			local hl_group = line:match(done_icon) and "DooingDone" or "DooingPending"
-			vim.api.nvim_buf_add_highlight(buf_id, ns_id, hl_group, i - 1, 0, -1)
-			for tag in line:gmatch("#(%w+)") do
-				local start_idx = line:find("#" .. tag) - 1
-				vim.api.nvim_buf_add_highlight(buf_id, ns_id, "Type", i - 1, start_idx, start_idx + #tag + 1)
+			for _, valid_line in ipairs(valid_lines) do
+				if valid_line.line_index == i then
+					local todo = valid_line.result.todo
+					-- Apply base highlight based on todo status
+					if todo.done then
+						vim.api.nvim_buf_add_highlight(buf_id, ns_id, "DooingDone", line_nr, 0, -1)
+					else
+						-- Get priority-based highlight if todo has priorities
+						local score = state.get_priority_score(todo)
+						local hl_group = "DooingPending"
+
+						if todo.priorities and #todo.priorities > 0 then
+							for _, group_name in pairs(config.options.priority_groups) do
+								local all_match = true
+								for _, required in ipairs(group_name.members) do
+									local found = false
+									for _, priority in ipairs(todo.priorities) do
+										if priority == required then
+											found = true
+											break
+										end
+									end
+									if not found then
+										all_match = false
+										break
+									end
+								end
+								if all_match then
+									hl_group = group_name.hl_group or "DooingPending"
+									break
+								end
+							end
+						end
+						vim.api.nvim_buf_add_highlight(buf_id, ns_id, hl_group, line_nr, 0, -1)
+					end
+
+					-- Apply tag highlights
+					for tag in todo.text:gmatch("#(%w+)") do
+						local start_idx = line:find("#" .. tag) - 1
+						if start_idx then
+							vim.api.nvim_buf_add_highlight(
+								buf_id,
+								ns_id,
+								"Type",
+								line_nr,
+								start_idx,
+								start_idx + #tag + 1
+							)
+						end
+					end
+
+					-- Highlight overdue status if present and todo is not done
+					if not todo.done and todo.due_at and todo.due_at < os.time() then
+						local overdue_str = "[OVERDUE]"
+						local overdue_start = line:find(overdue_str)
+						if overdue_start then
+							vim.api.nvim_buf_add_highlight(
+								buf_id,
+								ns_id,
+								"ErrorMsg",
+								line_nr,
+								overdue_start - 1,
+								overdue_start + #overdue_str - 1
+							)
+						end
+					end
+					break
+				end
 			end
-		elseif line:match("Search Results") then
-			vim.api.nvim_buf_add_highlight(buf_id, ns_id, "WarningMsg", i - 1, 0, -1)
+		elseif line:match("Search Results for:") then
+			vim.api.nvim_buf_add_highlight(buf_id, ns_id, "WarningMsg", line_nr, 0, -1)
 		end
 	end
 
@@ -104,7 +186,6 @@ end
 
 -- Create and configure search window
 function M.create(main_win_id, render_callback)
-	-- If search window exists and is valid, focus on it
 	if win_id and vim.api.nvim_win_is_valid(win_id) then
 		vim.api.nvim_set_current_win(win_id)
 		vim.ui.input({ prompt = "Search todos: " }, function(query)
@@ -113,13 +194,11 @@ function M.create(main_win_id, render_callback)
 		return
 	end
 
-	-- If search window exists but is not valid, reset IDs
 	if win_id then
 		win_id = nil
 		buf_id = nil
 	end
 
-	-- Create search results buffer
 	buf_id = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_option(buf_id, "buflisted", true)
 	vim.api.nvim_buf_set_option(buf_id, "modifiable", false)
@@ -134,7 +213,6 @@ function M.create(main_win_id, render_callback)
 	local col = main_col - width - 2
 	local row = math.floor((ui.height - height) / 2)
 
-	-- Create window
 	win_id = vim.api.nvim_open_win(buf_id, true, {
 		relative = "editor",
 		row = row,
@@ -147,7 +225,6 @@ function M.create(main_win_id, render_callback)
 		title_pos = "center",
 	})
 
-	-- Create search query pane
 	vim.ui.input({ prompt = "Search todos: " }, function(query)
 		handle_search_query(query, main_win_id, render_callback)
 	end)
